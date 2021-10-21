@@ -17,15 +17,15 @@ class RegModel:
     data: xr.Dataset
     y: DesignMatrix
     x: DesignMatrix
-    betas: tf.Tensor
     estimator_label: str
+    betas: Optional[tf.Tensor] = None
 
     def __post_init__(self) -> None:
         self._y_design_info: DesignInfo = self.y.design_info
         self._x_design_info: DesignInfo = self.x.design_info
 
     def __repr__(self):
-        if not self.betas:
+        if self.betas is None:
             display(self.data)
             print("No model has yet been estimated")
 
@@ -51,7 +51,7 @@ class OLS:
         y_tensor: tf.Tensor = tf.constant(y)
         x_tensor: tf.Tensor = tf.constant(x)
         betas: tf.Tensor = OLS.fit_exec(y_tensor, x_tensor)
-        out: RegModel = RegModel(data, y, x, betas, "Direct Ordinary Least Squares")
+        out: RegModel = RegModel(data, y, x, "Direct Ordinary Least Squares", betas)
         return out
 
     @staticmethod

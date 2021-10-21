@@ -31,7 +31,6 @@ class Viz:
             x: str,
             color: str,
             stat: Callable[[Iterable[float]], float] = np.mean,
-            label: Callable[[str], str] = lambda stat_val: f"Avg = {stat_val}",
             figsize: Tuple[int, int] = (12, 5),
             title: str = "",
             **kwargs
@@ -39,30 +38,31 @@ class Viz:
         fig, ax = plt.subplots(figsize=figsize)
         series_input: SeriesPlotIn = SeriesPlotIn(x, self.data[x], color)
         out: Axes = Viz.dist_with_stat(ax, series_input, stat, vert=True, **kwargs)
-        stat_val_desc: str = Viz.stat_label(self.data, x, stat, label)
+        stat_val_desc: str = Viz.stat_label(self.data[x], stat)
         out.set_title(f"{title} ({stat_val_desc})")
         return out
 
     @staticmethod
     def univariate_compare(
-            grp_1: SeriesPlotIn,
-            grp_2: SeriesPlotIn,
+            series: List[SeriesPlotIn],
             stat: Callable[[Iterable[float]], float] = np.mean,
             figsize: Tuple[int, int] = (12, 5),
             title: str = "",
             **kwargs
     ) -> Axes:
         fig, ax = plt.subplots(figsize=figsize)
-        with_x: Axes = Viz.dist_with_stat(ax, grp_1, stat, vert=True, **kwargs)
-        with_y: Axes = Viz.dist_with_stat(with_x, grp_2, stat, vert=True, **kwargs)
-        stat_val_desc_1: str = Viz.stat_label(grp_1.data, stat)
-        stat_val_desc_2: str = Viz.stat_label(grp_2.data, stat)
-        with_y.set_title(f"{title} ({grp_1.label} {stat_val_desc_1}; {grp_2.label} {stat_val_desc_2})")
-        return with_y
+
+        for ser in series:
+            ax = Viz.dist_with_stat(ax, ser, stat, vert=True, **kwargs)
+            stat_val_desc: str = Viz.stat_label(ser.data, stat)
+            print(f"{ser.label} {stat_val_desc}")
+
+        ax.set_title(title)
+        return ax
 
     @staticmethod
     def stat_label(data: Iterable[float], stat: Callable[[Iterable[float]], float] = np.mean) -> str:
-        stat_val: float = stat(data)
+        stat_val: float = stat(data).data
         stat_val_desc: str = f"{stat.__name__}: {'{:.2f}'.format(stat_val)}"
         return stat_val_desc
 
