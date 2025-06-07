@@ -4,3 +4,7 @@
 *.pyc
 *.pyi
 statsconcepts.egg-info
+*.log
+__pycache__/
+*.egg-info/
+*.egg

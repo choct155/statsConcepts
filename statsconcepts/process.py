@@ -446,6 +446,7 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
             observation_var (str): The variable determining values in each distribution (within groups)
             figsize (Tuple[int, int]): The size of the figure. Default is (10, 6).
         """
+
         data: xr.DataArray = transform(ds[measure].groupby([comparison_var, observation_var]))
         plot_data: pd.DataFrame = data.to_dataframe().reset_index()
 
