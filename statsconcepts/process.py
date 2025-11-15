@@ -1,12 +1,16 @@
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 import seaborn as sb
 import xarray as xr
+from xarray import DataArray, Dataset
+from xarray.core.groupby import DataArrayGroupBy
 import pymc as pm
 import numpy as np
 import graphviz
 import arviz as az
 import pytensor as pt
-from typing import Optional, Tuple, Set, List, Dict, Union, Callable
+from typing import Optional, Tuple, Set, List, Dict, Union, Callable, Generator
 from dataclasses import dataclass
 import simpy as sim
 import logging
@@ -136,11 +140,11 @@ class WidgetContainer:
 
 class WidgetContainerGenerator:
 
-    def __init__(self, env: sim.Environment, name: str, concept_dist: np.array, n: int = 10) -> "WidgetContainerGenerator":
+    def __init__(self, env: sim.Environment, name: str, concept_dist: np.ndarray, n: int = 10) -> None:
         self.env: sim.Environment = env
         self.name: str = name
         self.n: int = n
-        self.concept_dist: np.array = concept_dist
+        self.concept_dist: np.ndarray = concept_dist
         self.widget_containers: List[WidgetContainer] = self.generate_containers()
 
     def _generate_container(self, container_id: int) -> WidgetContainer:
@@ -149,12 +153,12 @@ class WidgetContainerGenerator:
         return WidgetContainer(name=name, container=sim.Container(self.env, init=volume, capacity=volume))
 
     def generate_containers(self) -> List[WidgetContainer]:
-        containers: List[sim.Container] = [self._generate_container(i) for i in range(self.n)]
+        containers: List[WidgetContainer] = [self._generate_container(i) for i in range(self.n)]
         return containers
 
 class WidgetStore:
 
-    def __init__(self, env: sim.Environment, name: str, capacity: Union[int, float] = np.inf) -> "WidgetStore":
+    def __init__(self, env: sim.Environment, name: str, capacity: Union[int, float] = np.inf) -> None:
         self.env = env
         self.name = name
         self.store: sim.Store = sim.Store(env, capacity=capacity)
@@ -194,10 +198,10 @@ class Pipeline:
         self, 
         env: sim.Environment, 
         name: str, allocations: List[Allocation], 
-        process_dist: np.array,
+        process_dist: np.ndarray,
         pipeline_source: WidgetStore,
         pipeline_sink: WidgetStore
-    ) -> "Pipeline":
+    ) -> None:
         self.env = env
         self.name = name
         self.allocations = allocations
@@ -205,7 +209,7 @@ class Pipeline:
         self.pipeline_source = pipeline_source
         self.pipeline_sink = pipeline_sink
         self.stages = self._gen_stages()
-        self.container_data: Dict[str, Union[float, int]] = {
+        self.container_data: Dict[str, List[Union[float, int, str]]] = {
             "pipeline": [],
             "source": [],
             "sink": [],
@@ -235,7 +239,12 @@ class Pipeline:
           """)
 
 
-    def _process_widget(self, container: WidgetContainer, stage: Stage, process_id: int) -> sim.events.Process:
+    def _process_widget(
+        self, 
+        container: WidgetContainer, 
+        stage: Stage, 
+        process_id: int
+    ) -> Generator[sim.Process]:
         process_name: str = f"process_{container.name}_{process_id}"
         logger.info(f"Widget {process_name} for container {container.name} (level = {container.container.level})started at stage {stage.label} at time {self.env.now}")
         processing_time: int = int(np.random.choice(self.process_dist, 1)[0])
@@ -252,7 +261,7 @@ class Pipeline:
             yield container.container.get(1)
 
 
-    def _process_container(self, container: WidgetContainer, stage: Stage) -> sim.events.Process:
+    def _process_container(self, container: WidgetContainer, stage: Stage) -> Generator[sim.Process]:
         start_time: float = self.env.now
         logger.info(f"Processing container {container.name} at stage {stage.label} at time {start_time}")
 
@@ -276,7 +285,7 @@ class Pipeline:
         self.container_data["end_time"].append(end_time)
 
 
-    def run(self) -> sim.events.Process:
+    def run(self) -> Generator[sim.Process]:
         logger.info(f"""
 Containers in source store {self.pipeline_source.name} at time {self.env.now}:
 {[c.name for c in self.pipeline_source.store.items]}
@@ -312,27 +321,27 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
 
         return data
 
-    def get_container_data_xr(self, sim_num: int = 0) -> xr.Dataset:
+    def get_container_data_xr(self, sim_num: int = 0) -> Dataset:
         """
         Returns the container data collected during the simulation as an xarray Dataset.
         Returns:
-            xr.Dataset: An xarray Dataset containing the container data.
+            Dataset: An xarray Dataset containing the container data.
         """
         data: pd.DataFrame = self.get_container_data(sim_num)
-        def to_data_array(v: str) -> xr.DataArray:
-            tmp_df: pd.DataFrame = data.set_index(["container_id", "stage"])[v]
-            xarr: xr. DataArray = xr.DataArray(tmp_df.unstack())
+        def to_data_array(v: str) -> DataArray:
+            tmp_ser: pd.Series = data.set_index(["container_id", "stage"])[v]
+            xarr: xr. DataArray = DataArray(tmp_ser.unstack())
             xarr = xarr.expand_dims({"pipeline": [self.name], "simulation": [sim_num]})
             return xarr
 
-        data_arrays: Dict[str, xr.DataArray] = {
+        data_arrays: Dict[str, DataArray] = {
             "num_widgets": to_data_array("num_widgets"),
             "process_time": to_data_array("process_time"),
             "start_time": to_data_array("start_time"),
             "end_time": to_data_array("end_time"),
             "num_resources": to_data_array("num_resources"),
         }
-        ds: xr.Dataset = xr.Dataset(data_arrays)
+        ds: Dataset = Dataset(data_arrays)
         ds.attrs = {"source": self.pipeline_source.name, "sink": self.pipeline_sink.name}
         return ds
 
@@ -342,28 +351,28 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
         n_sim: int, 
         n_containers: int,
         allocations: List[Allocation], 
-        process_dist: np.array,
-        concept_dist: np.array,
+        process_dist: np.ndarray,
+        concept_dist: np.ndarray,
         pipeline_name: str = "allocation_0",
         pipeline_source_name: str = "source", 
         pipeline_sink_name: str = "sink",
         generator_name: str = "wgen",
-    ) -> xr.Dataset:
+    ) -> Dataset:
         """
         Runs multiple simulations of the pipeline and returns the results as an xarray Dataset.
 
         Args:
             n (int): The number of simulations to run.
             allocations (List[Allocation]): A list of allocations for each stage.
-            process_dist (np.array): The distribution of processing times.
+            process_dist (np.ndarray): The distribution of processing times.
             pipeline_source (WidgetStore): The source store for the pipeline.
             pipeline_sink (WidgetStore): The sink store for the pipeline.
 
         Returns:
-            xr.Dataset: An xarray Dataset containing the results of the simulations.
+            Dataset: An xarray Dataset containing the results of the simulations.
         """
 
-        ds_list: List[xr.Dataset] = []
+        ds_list: List[Dataset] = []
         for i in range(n_sim):
             logger.info(f"Running simulation {i+1}/{n_sim}")
             env_i: sim.Environment = sim.Environment()
@@ -396,16 +405,19 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
         n_sim: int, 
         n_containers: int,
         allocations: Dict[str, List[Allocation]], 
-        process_dist: np.array,
-        concept_dist: np.array,
+        process_dist: np.ndarray,
+        concept_dist: np.ndarray,
         pipeline_source_name: str = "source", 
         pipeline_sink_name: str = "sink",
         generator_name: str = "wgen",
-    ) -> xr.Dataset:
+    ) -> Dataset:
 
+        if len(allocations) == 0:
+            raise ValueError("No allocations provided for simulations.")
+        
         for allocation_name, allocation_list in allocations.items():
             logger.info(f"Running simulations for allocation {allocation_name}")
-            ds: xr.Dataset = Pipeline.simulations(
+            ds: Dataset = Pipeline.simulations(
                 n_sim=n_sim,
                 n_containers=n_containers,
                 allocations=allocation_list,
@@ -417,7 +429,7 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
                 generator_name=generator_name
             )
             if allocation_name == list(allocations.keys())[0]:
-                ds_allocation: xr.Dataset = ds
+                ds_allocation: Dataset = ds
             else:
                 ds_allocation = xr.concat([ds_allocation, ds], dim="pipeline")
         return ds_allocation
@@ -425,33 +437,33 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
     
     @staticmethod
     def comparison_plot(
-        ds: xr.Dataset, 
+        ds: Dataset, 
         measure: str = "process_time", 
         comparison_var: str = "pipeline",
         observation_var: str = "simulation",
         group_var: Optional[str] = None,
-        transform: Callable[[xr.DataArray], xr.DataArray] = lambda x: x.mean(
+        transform: Callable[[DataArrayGroupBy], DataArray] = lambda x: x.mean(
             dim=["stage", "container_id"]
         ),
         figsize: Tuple[int, int] = (10, 6),
         ttl_in: Optional[str] = None
-    ) -> plt.Figure:
+    ) -> Figure:
         """
         Creates a comparison plot for the specified variable in the dataset.
 
         Args:
-            ds (xr.Dataset): The xarray Dataset containing the simulation results.
+            ds (Dataset): The xarray Dataset containing the simulation results.
             measure (str): The variable to plot. Default is "process_time".
             comparison_var (str): The variable determining groups upon which comparison is made (across groups)
             observation_var (str): The variable determining values in each distribution (within groups)
             figsize (Tuple[int, int]): The size of the figure. Default is (10, 6).
         """
 
-        data: xr.DataArray = transform(ds[measure].groupby([comparison_var, observation_var]))
+        data: DataArray = transform(ds[measure].groupby([comparison_var, observation_var]))
         plot_data: pd.DataFrame = data.to_dataframe().reset_index()
 
         fig, ax = plt.subplots(figsize=figsize)
-        compare_plot: plt.Figure = sb.violinplot(
+        compare_plot: Axes = sb.violinplot(
             data=plot_data,
             x=comparison_var,
             y=measure,
@@ -461,3 +473,4 @@ Containers in sink store {self.pipeline_sink.name} at time {self.env.now}:
         ttl: str = f"{measure} by {comparison_var}" if ttl_in is None else ttl_in
         ax.set_title(ttl)
         plt.show()
+        return fig
